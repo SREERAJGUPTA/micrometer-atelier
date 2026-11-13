@@ -1,0 +1,15 @@
+let ctx:AudioContext|undefined;let enabled=false;let volume=.16;let last=0;
+export const audio={set(on:boolean){enabled=on;if(on){ctx??=new AudioContext();void ctx.resume()}},volume(n:number){volume=n},click(kind:'ratchet'|'lock'|'place'='ratchet'){if(!enabled||!ctx||ctx.state!=='running'||performance.now()-last<65)return;last=performance.now();const t=ctx.currentTime;const o=ctx.createOscillator(),g=ctx.createGain();o.type='triangle';o.frequency.setValueAtTime(kind==='ratchet'?1450:kind==='lock'?620:880,t);o.frequency.exponentialRampToValueAtTime(180,t+.035);g.gain.setValueAtTime(volume*.3,t);g.gain.exponentialRampToValueAtTime(.0001,t+.06);o.connect(g).connect(ctx.destination);o.start(t);o.stop(t+.07)}};
+export function load<T>(key:string,fallback:T):T{try{const v=localStorage.getItem('micrometer-'+key);return v?JSON.parse(v):fallback}catch{return fallback}}
+export function save(key:string,value:unknown){try{localStorage.setItem('micrometer-'+key,JSON.stringify(value));return true}catch{return false}}
+export function exportCSV(rows:Record<string,unknown>[]){if(!rows.length)return;const fields=Object.keys(rows[0]);const cell=(v:unknown)=>'"'+String(v??'').replaceAll('"','""')+'"';const csv='\uFEFF'+[fields.map(cell).join(','),...rows.map(r=>fields.map(k=>cell(r[k])).join(','))].join('\r\n');const u=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=u;a.download='Micrometer-Measurement-Records.csv';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+export async function installOffline(){
+ if(!('serviceWorker' in navigator))throw Error('Offline installation is unavailable in this browser.');
+ const reg=await navigator.serviceWorker.register('./sw.js',{scope:'./',updateViaCache:'none'});
+ try{await reg.update()}catch(error){if(!reg.active)throw error}
+ const worker=reg.installing??reg.waiting??reg.active;
+ if(!worker)throw Error('The offline worker has not started. Try again.');
+ if(worker.state!=='activated')await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Offline installation is taking longer than expected. Try again.')),25000);const check=()=>{if(worker.state==='activated'){clearTimeout(timer);worker.removeEventListener('statechange',check);resolve()}else if(worker.state==='redundant'){clearTimeout(timer);reject(Error('Offline installation could not finish. Try again.'))}};worker.addEventListener('statechange',check);if(worker.state==='installed')worker.postMessage('activate');check()});
+ const active=reg.active;if(!active)throw Error('Offline activation is incomplete.');
+ return await new Promise<boolean>((resolve,reject)=>{const channel=new MessageChannel();const timer=setTimeout(()=>{channel.port1.close();reject(Error('Could not verify the complete offline package.'))},12000);channel.port1.onmessage=e=>{clearTimeout(timer);channel.port1.close();if(e.data?.ready)resolve(true);else reject(Error('Offline resources are incomplete. Reconnect and try again.'))};active.postMessage({type:'CHECK_READY'},[channel.port2])});
+}
